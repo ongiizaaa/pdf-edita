@@ -552,13 +552,37 @@ function toast(msg,type='',keep=false){
 }
 const SC=()=>BASE_SCALE*zoom;
 
+// ไฟล์ที่ผ่านโปรแกรม merge บางตัว (เช่น Adolix) มี object stream (ObjStm) ตกค้างจากไฟล์ต้นฉบับ
+// xref ของไฟล์ไม่ได้ชี้ถึง แต่ pdf-lib อ่านทุก object ในไฟล์ เลยเอาของเก่าไปทับ object จริง → หน้าว่าง
+// ถ้า xref ทั้งสายเป็นตารางแบบธรรมดา (ไม่มี xref stream) ตามสเปกจะไม่มี object ใน ObjStm ที่ใช้งานได้เลย
+// จึงเปลี่ยนชื่อ /ObjStm → /ObjStX ให้ pdf-lib มองเป็น stream ธรรมดา; กรณีอื่นคืนไฟล์เดิม
+function dropOrphanObjStms(buf){
+  const bytes=new Uint8Array(buf);
+  const s=new TextDecoder('latin1').decode(bytes);
+  if(!/\/Type\s*\/ObjStm\b/.test(s))return bytes;
+  const sx=s.lastIndexOf('startxref');if(sx<0)return bytes;
+  let off=parseInt(s.slice(sx+9,sx+40).trim(),10);const seen=new Set();
+  while(Number.isFinite(off)&&!seen.has(off)){
+    seen.add(off);
+    if(!/^\s*xref\b/.test(s.slice(off,off+40)))return bytes;
+    const t=s.indexOf('trailer',off),e=s.indexOf('startxref',t);
+    if(t<0||e<0)return bytes;
+    const trailer=s.slice(t,e);
+    if(/\/XRefStm\b/.test(trailer))return bytes;
+    const p=trailer.match(/\/Prev\s+(\d+)/);off=p?parseInt(p[1],10):NaN;
+  }
+  const out=bytes.slice(),re=/\/Type\s*\/ObjStm\b/g;let m;
+  while((m=re.exec(s)))out[m.index+m[0].length-1]=0x58; // m → X
+  return out;
+}
+
 async function loadMain(file){
   const done=toast('กำลังเปิดไฟล์…','',true);
   const dn=$('#docName');if(dn){dn.textContent=file.name||'';dn.title=file.name||'';dn.classList.toggle('show',!!file.name);}
   try{
     if(file.type==='application/pdf'){
       const buf=await file.arrayBuffer();
-      doc=await PDFDocument.load(buf,{ignoreEncryption:true});
+      doc=await PDFDocument.load(dropOrphanObjStms(buf),{ignoreEncryption:true});
     }else if(file.type.startsWith('image/')){
       doc=await PDFDocument.create();
       await addImageAsA4Page(file);
@@ -2020,7 +2044,7 @@ $('#fileInsert').addEventListener('change',async e=>{
   const insertAt=pendingInsertAt??doc.getPageCount();pendingInsertAt=null;
   const done=toast('กำลังแทรก…','',true);
   try{
-    const src=await PDFDocument.load(await f.arrayBuffer(),{ignoreEncryption:true});
+    const src=await PDFDocument.load(dropOrphanObjStms(await f.arrayBuffer()),{ignoreEncryption:true});
     const idx=[...Array(src.getPageCount()).keys()];
     const copied=await doc.copyPages(src,idx);
     copied.forEach((p,n)=>doc.insertPage(insertAt+n,p));
