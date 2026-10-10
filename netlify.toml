@@ -1,0 +1,9 @@
+# ไซต์ static ไฟล์เดียว ไม่ต้อง build
+[build]
+  publish = "."
+  command = ""
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-cache"
