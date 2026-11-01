@@ -210,6 +210,10 @@
     border:1px solid transparent}
   .fbtn:hover{background:var(--line-soft)}
   .fbtn.on{background:var(--accent-soft);color:var(--accent);border-color:#c9d8ff}
+  .fbg{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ink-soft);white-space:nowrap}
+  .fbg .sw{width:22px;height:22px;border-radius:6px;border:1px solid rgba(0,0,0,.15);padding:0;cursor:pointer}
+  .fbg .sw.none{background:linear-gradient(135deg,#fff 45%,var(--danger) 45%,var(--danger) 55%,#fff 55%)}
+  .fbg .sw.on{outline:2px solid var(--accent);outline-offset:1px}
   .modal-bg{position:fixed;inset:0;background:rgba(20,24,34,.4);display:none;place-items:center;z-index:50;
     backdrop-filter:blur(2px)}
   .modal-bg.show{display:grid}
@@ -459,6 +463,16 @@
   <input type="color" id="fColor" value="#111111" title="สีข้อความ">
   <button class="fbtn" id="fBold" title="ตัวหนา">B</button>
   <div class="sep"></div>
+  <div class="fbg" id="fBgRow"><span>พื้นหลัง</span>
+    <button class="sw none" data-bg="" title="ไม่มีพื้นหลัง"></button>
+    <button class="sw" data-bg="#fff200" style="background:#fff200" title="เหลืองเรืองแสง"></button>
+    <button class="sw" data-bg="#39ff14" style="background:#39ff14" title="เขียวเรืองแสง"></button>
+    <button class="sw" data-bg="#ff3df5" style="background:#ff3df5" title="ชมพูเรืองแสง"></button>
+    <button class="sw" data-bg="#ff9f00" style="background:#ff9f00" title="ส้มเรืองแสง"></button>
+    <button class="sw" data-bg="#00f0ff" style="background:#00f0ff" title="ฟ้าเรืองแสง"></button>
+    <input type="color" id="fBg" value="#39ff14" title="เลือกสีพื้นหลังเอง">
+  </div>
+  <div class="sep" id="fBgSep"></div>
   <label>ระยะอักษร <input type="number" id="fLetter" value="0" min="-20" max="80" step="0.5"></label>
   <label>ระยะบรรทัด <input type="number" id="fLine" value="2" min="0" max="80" step="0.5"></label>
 </div>
@@ -1185,6 +1199,7 @@ function startEditing(box){
   focusCaret();
   requestAnimationFrame(focusCaret);
 }
+const TBOX_BG_PAD=0.15; // ระยะเผื่อของพื้นหลังกล่องข้อความ (เท่าของขนาดฟอนต์)
 function applyTextStyle(box){
   const a=box._obj,sc=SC();
   box.style.fontSize=(a.size*sc)+'px';
@@ -1193,6 +1208,9 @@ function applyTextStyle(box){
   box.style.fontWeight=a.bold?'700':'400';
   box.style.letterSpacing=((a.letterSpacing??0)*sc)+'px';
   box.style.lineHeight=((a.size*1.3+(a.lineSpacing??2))*sc)+'px';
+  // พื้นหลังขยายออกนอกกล่องด้วยเงา เพื่อไม่ให้ตำแหน่งตัวอักษรขยับ (ตรงกับตอนส่งออก)
+  box.style.backgroundColor=a.bg||'';
+  box.style.boxShadow=a.bg?`0 0 0 ${a.size*TBOX_BG_PAD*sc}px ${a.bg}`:'';
 }
 function positionText(box){
   const a=box._obj,sc=SC();
@@ -1488,6 +1506,8 @@ function selectObj(elm){
     // comb ไม่มีระยะตัวอักษร/บรรทัด
     $('#fLetter').closest('label').style.display=elm._type==='comb'?'none':'';
     $('#fLine').closest('label').style.display=elm._type==='comb'?'none':'';
+    $('#fBgRow').style.display=$('#fBgSep').style.display=elm._type==='comb'?'none':'';
+    markBgSwatch(a.bg);
     $('#fcText').classList.add('show');
   }else if(elm._type==='shape'){
     const s=elm._obj;
@@ -1516,6 +1536,15 @@ $('#fColor').addEventListener('input',e=>{if(!isTextLike())return;
   sel._obj.color=e.target.value;restyleSel();scheduleHistory();});
 $('#fBold').addEventListener('click',()=>{if(!isTextLike())return;
   sel._obj.bold=!sel._obj.bold;restyleSel();$('#fBold').classList.toggle('on',sel._obj.bold);recordHistory();});
+function markBgSwatch(bg){
+  document.querySelectorAll('#fBgRow .sw').forEach(b=>b.classList.toggle('on',(b.dataset.bg||null)===(bg||null)));
+  if(bg)$('#fBg').value=bg;
+}
+document.querySelectorAll('#fBgRow .sw').forEach(b=>b.addEventListener('click',()=>{
+  if(!sel||sel._type!=='text')return;
+  sel._obj.bg=b.dataset.bg||null;applyTextStyle(sel);markBgSwatch(sel._obj.bg);recordHistory();}));
+$('#fBg').addEventListener('input',e=>{if(!sel||sel._type!=='text')return;
+  sel._obj.bg=e.target.value;applyTextStyle(sel);markBgSwatch(sel._obj.bg);scheduleHistory();});
 $('#fLetter').addEventListener('input',e=>{if(!sel||sel._type!=='text')return;
   sel._obj.letterSpacing=+e.target.value;applyTextStyle(sel);scheduleHistory();});
 $('#fLine').addEventListener('input',e=>{if(!sel||sel._type!=='text')return;
@@ -2073,6 +2102,14 @@ function fillTextSpaced(ctx,text,x,y,spacing){
   let cx=x;
   chars.forEach(ch=>{ctx.fillText(ch,cx,y);cx+=ctx.measureText(ch).width+spacing;});
 }
+// ความกว้างบรรทัดแบบเดียวกับ CSS letter-spacing (บวกระยะหลังทุกตัวอักษร)
+function measureTextSpaced(ctx,text,spacing){
+  if(!spacing)return ctx.measureText(text).width;
+  const chars=Intl.Segmenter
+    ?[...new Intl.Segmenter('th',{granularity:'grapheme'}).segment(text)].map(s=>s.segment)
+    :Array.from(text);
+  return chars.reduce((w,ch)=>w+ctx.measureText(ch).width+spacing,0);
+}
 
 async function bakeToCanvas(ctx,pi,scale){
   for(const o of pages[pi].imgs){
@@ -2127,6 +2164,12 @@ async function bakeToCanvas(ctx,pi,scale){
     ctx.fillStyle=a.color;ctx.textBaseline='top';
     ctx.save();ctx.translate(a.x*scale,a.y*scale);
     if(a.rot)ctx.rotate(a.rot*Math.PI/180); // หมุนรอบมุมบนซ้าย เหมือนบนจอ
+    if(a.bg){
+      const lines=a.text.split('\n'),sp=(a.letterSpacing??0)*scale,pad=a.size*TBOX_BG_PAD*scale;
+      const w=Math.max(...lines.map(l=>measureTextSpaced(ctx,l,sp)));
+      const h=lines.length*(a.size*1.3+(a.lineSpacing??2))*scale;
+      ctx.fillStyle=a.bg;ctx.fillRect(-pad,-pad,w+pad*2,h+pad*2);ctx.fillStyle=a.color;
+    }
     a.text.split('\n').forEach((line,li)=>{
       fillTextSpaced(ctx,line,0,((a.size*1.3+(a.lineSpacing??2))*li)*scale,(a.letterSpacing??0)*scale);
     });
